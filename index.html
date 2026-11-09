@@ -16,9 +16,9 @@
     letter-spacing:.2em;cursor:pointer}
   #desktopBtn:hover,#skipBtn:hover,#vrSkipBtn:hover:not(:disabled),#vrBtn:hover:not(:disabled){background:#1a1712}
   #skipBtn,#vrSkipBtn{margin-top:10px;font-size:13px;padding:9px 20px;border-color:#3f4a3c;color:#8fa088}
-  #skipBtn3,#vrSkipBtn3{margin-top:10px;background:none;border:1px solid #3f4a52;color:#8a9aa8;font:inherit;font-size:13px;letter-spacing:.2em;padding:9px 20px;cursor:pointer}
-  #skipBtn3:hover,#vrSkipBtn3:hover:not(:disabled){background:#1a1712}
-  #vrSkipBtn3:disabled{opacity:.45;cursor:default;border-color:#4a4438;background:none}
+  #skipBtn3,#vrSkipBtn3,#skipBtn4,#vrSkipBtn4{margin-top:10px;background:none;border:1px solid #3f4a52;color:#8a9aa8;font:inherit;font-size:13px;letter-spacing:.2em;padding:9px 20px;cursor:pointer}
+  #skipBtn3:hover,#vrSkipBtn3:hover:not(:disabled),#skipBtn4:hover,#vrSkipBtn4:hover:not(:disabled){background:#1a1712}
+  #vrSkipBtn3:disabled,#vrSkipBtn4:disabled{opacity:.45;cursor:default;border-color:#4a4438;background:none}
   #vrSkipBtn:disabled{opacity:.45;cursor:default;border-color:#4a4438;background:none}
   #vrBtn{margin-top:18px;background:#2a0d0d;border:1px solid #8a3a30;color:#e0cfc0;padding:16px 34px;font:inherit;
     font-size:18px;letter-spacing:.2em;cursor:pointer}
@@ -51,10 +51,12 @@
   <button id="vrBtn" disabled>CHECKING VR…</button>
   <button id="vrSkipBtn" disabled>VR · SKIP TO LEVEL 2</button>
   <button id="vrSkipBtn3" disabled>VR · SKIP TO LEVEL 3</button>
+  <button id="vrSkipBtn4" disabled>VR · SKIP TO LEVEL 4</button>
   <div id="vrStatus" style="font-size:13px;color:#8d8676;margin-top:8px;max-width:560px"></div>
   <button id="desktopBtn">PLAY ON DESKTOP</button>
   <button id="skipBtn">SKIP TO LEVEL 2</button>
   <button id="skipBtn3">SKIP TO LEVEL 3</button>
+  <button id="skipBtn4">SKIP TO LEVEL 4</button>
   <div id="err"></div>
 </div>
 <div id="pause"><div><h2>PAUSED</h2><p>Click to resume</p>
@@ -73,7 +75,7 @@ import * as THREE from 'three';
 const T = 2.6;            // tile size (m)
 const H = 3.0;            // wall height (m)
 const CELLS = 9;          // maze cells per side
-const N = CELLS * 2 + 1;  // tile grid size
+let N = CELLS * 2 + 1;    // tile grid size (the ocean level uses a much bigger one)
 const D4 = [[1,0],[-1,0],[0,1],[0,-1]];
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -111,6 +113,24 @@ function carveMaze(braid, rooms) {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) grid[cy + dy][cx + dx] = 0;
   }
 }
+function carveOcean() {            // wide open seabed with scattered rock pillars and ridges
+  grid = Array.from({ length: N }, (_, j) => Array.from({ length: N }, (_, i) => (i === 0 || j === 0 || i === N - 1 || j === N - 1) ? 1 : 0));
+  const inb = (i, j) => i > 0 && j > 0 && i < N - 1 && j < N - 1;
+  for (let k = 0; k < 28; k++) {
+    const ci = rnd(3, N - 3), cj = rnd(3, N - 3), rx = rnd(1, 3.2), rz = rnd(1, 3.2);
+    if (ci < 14 && cj < 14) continue;
+    for (let j = Math.floor(cj - rz); j <= Math.ceil(cj + rz); j++) for (let i = Math.floor(ci - rx); i <= Math.ceil(ci + rx); i++)
+      if (inb(i, j) && ((i - ci) / rx) ** 2 + ((j - cj) / rz) ** 2 <= 1 + (Math.random() - .5) * .5) grid[j][i] = 1;
+  }
+  for (let k = 0; k < 6; k++) {
+    const ci = rnd(8, N - 8), cj = rnd(8, N - 8), a = rnd(0, Math.PI), len = rnd(5, 9);
+    if (ci < 14 && cj < 14) continue;
+    for (let q = -len; q <= len; q++) { const i = Math.round(ci + Math.cos(a) * q), j = Math.round(cj + Math.sin(a) * q); if (inb(i, j)) grid[j][i] = 1; if (inb(i + 1, j) && Math.random() < .4) grid[j][i + 1] = 1; }
+  }
+  for (let j = 1; j <= 10; j++) for (let i = 1; i <= 10; i++) grid[j][i] = 0;     // keep the crash site clear
+  const f = bfs(1, 1);
+  for (let j = 1; j < N - 1; j++) for (let i = 1; i < N - 1; i++) if (grid[j][i] === 0 && f[i + j * N] < 0) grid[j][i] = 1;   // fill sealed pockets
+}
 const solid = (i, j) => i < 0 || j < 0 || i >= N || j >= N || grid[j][i] === 1;
 const solidAt = (x, z) => solid(Math.floor(x / T), Math.floor(z / T));
 const tileCenter = (i, j) => new THREE.Vector3((i + .5) * T, 0, (j + .5) * T);
@@ -129,12 +149,12 @@ function bfs(si, sj) {
   }
   return d;
 }
-function planLevel(need) {
+function planLevel(need, near) {
   startField = bfs(1, 1);
   cells = [];
   for (let j = 1; j < N; j += 2) for (let i = 1; i < N; i += 2) cells.push({ i, j, d: startField[i + j * N] });
   maxD = Math.max(...cells.map(c => c.d));
-  exitCell = cells.reduce((a, b) => (b.d > a.d ? b : a));
+  exitCell = near ? (cells.find(c => c.d >= 6) || cells[1]) : cells.reduce((a, b) => (b.d > a.d ? b : a));   // the ocean's submarine sits near where you start
   enemyCell = cells.filter(c => c !== exitCell)
     .reduce((a, b) => (Math.abs(b.d - maxD * .6) < Math.abs(a.d - maxD * .6) ? b : a));
   const minD = Math.min(8, Math.max(3, (maxD * .35) | 0));
@@ -220,7 +240,9 @@ const THEMES = {
   2: { label: 'LEVERS', need: 4, grace: 16, fog: 0x020a05, dens: .078, amb: 0x1d3a28, ambI: 1.0, head: 0x7fa88a, dust: 0x6f8a6a,
        title: 'THE SEWERS', sub: 'Pull all 4 levers. It is fast.' },
   3: { label: 'BUTTONS', need: 6, grace: 16, fog: 0x04070b, dens: .072, amb: 0x2a3644, ambI: 1.0, head: 0xa9c0d6, dust: 0x9aa4ae,
-       title: 'THE FACILITY', sub: 'Find and press all 6 buttons. Listen for the saw.' }
+       title: 'THE FACILITY', sub: 'Find and press all 6 buttons. Listen for the saw.' },
+  4: { label: 'FRAGMENTS', need: 6, grace: 20, fog: 0x010a12, dens: .055, amb: 0x0c2438, ambI: .45, head: 0x6fa0c0, headI: .55, dust: 0x7fb0c0,
+       title: 'THE OCEAN', sub: 'Find 6 submarine fragments and repair the sub. Your lamp draws it.' }
 };
 let LEVEL = 1, LV = THEMES[1], levelGroup = null, levelTex = [], wallMesh = null, relics = [], levers = [], exitObj = null;
 
@@ -245,6 +267,43 @@ function makeLever(c, idx) {
   else g.position.set(p.x, 0, p.z);
   levelGroup.add(g);
   return { group: g, pivot, lamp, glow, pulled: false, anim: 0, phase: idx * 1.3, pos: new THREE.Vector3(g.position.x, 1.1, g.position.z) };
+}
+
+function makeFragment(c, idx) {
+  const g = new THREE.Group();
+  const hull = new THREE.MeshStandardMaterial({ color: 0xb89a20, roughness: .45, metalness: .6 });
+  const core = new THREE.Group();
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(.55, .38, .06), hull);
+  const pipe = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, .5, 8), new THREE.MeshStandardMaterial({ color: 0x555a5e, roughness: .5, metalness: .7 })); pipe.rotation.z = .5; pipe.position.set(.05, .05, .08);
+  const lite = new THREE.Mesh(new THREE.SphereGeometry(.05, 8, 6), new THREE.MeshBasicMaterial({ color: 0x70f0ff, fog: false })); lite.position.set(-.2, .12, .05);
+  core.add(plate, pipe, lite); core.rotation.set(rnd(0, 1), rnd(0, 6), rnd(0, 1));
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x40e0ff, blending: THREE.AdditiveBlending, depthWrite: false, fog: true, transparent: true }));
+  glow.scale.set(2, 2, 2);
+  g.add(core, glow);
+  const p = tileCenter(c.i, c.j); g.position.set(p.x, 1.0, p.z); levelGroup.add(g);
+  return { group: g, core, collected: false, phase: idx * 1.7, pos: g.position };
+}
+function makeSub() {
+  const g = new THREE.Group();
+  const spin = new THREE.Group();                       // (the shared update code spins the first child; keep it a harmless dummy)
+  const hullM = new THREE.MeshStandardMaterial({ color: 0xb89a20, roughness: .5, metalness: .5 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a2c2e, roughness: .6, metalness: .6 });
+  const mat = new THREE.MeshBasicMaterial({ color: 0xaa1010, fog: false });
+  const body = new THREE.Group(); body.position.y = 1.2; body.rotation.z = .05; body.rotation.x = .06;
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 4.4, 20), hullM); tube.rotation.z = Math.PI / 2;
+  for (const sx of [-1, 1]) { const cap = new THREE.Mesh(new THREE.SphereGeometry(1.0, 20, 14), hullM); cap.scale.x = .8; cap.position.x = sx * 2.2; body.add(cap); }
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(.45, .5, 1.0, 12), hullM); tower.position.set(.3, 1.15, 0);
+  const peri = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, .9, 6), dark); peri.position.set(.3, 2.0, 0);
+  const rudder = new THREE.Mesh(new THREE.BoxGeometry(.7, 1.4, .08), dark); rudder.position.set(-2.8, 0, 0);
+  const prop = new THREE.Group(); prop.position.x = -3.1;
+  for (let k = 0; k < 3; k++) { const b = new THREE.Mesh(new THREE.BoxGeometry(.05, .8, .18), dark); b.rotation.x = k * 2.1; b.position.set(0, 0, 0); prop.add(b); }
+  body.add(tube, tower, peri, rudder, prop);
+  for (let k = -1; k <= 1; k++) for (const sz of [-1, 1]) { const ph = new THREE.Mesh(new THREE.SphereGeometry(.14, 10, 8), mat); ph.position.set(k * .9, .15, sz * .98); ph.scale.z = .5; body.add(ph); }
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff2020, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true }));
+  glow.scale.set(5, 5, 1); glow.position.y = 2.4;
+  g.add(spin, body, glow);
+  const p = tileCenter(exitCell.i, exitCell.j); g.position.set(p.x, 0, p.z); levelGroup.add(g);
+  return { group: g, mat, glow, pos: new THREE.Vector3(p.x, 1.2, p.z), open: false };
 }
 
 function makeButton(c, idx) {
@@ -279,8 +338,9 @@ function buildLevel(n) {
   }
   levelTex = []; levelGroup = new THREE.Group(); scene.add(levelGroup);
   LEVEL = n; LV = THEMES[n];
-  if (n === 1) carveMaze(CELLS * 2, 0); else carveMaze(Math.round(CELLS * 3.5), n === 3 ? 7 : 4);
-  planLevel(LV.need);
+  N = n === 4 ? 41 : CELLS * 2 + 1;
+  if (n === 4) carveOcean(); else if (n === 1) carveMaze(CELLS * 2, 0); else carveMaze(Math.round(CELLS * 3.5), n === 3 ? 7 : 4);
+  planLevel(LV.need, n === 4);
   const LT = (...a) => { const t = canvasTex(...a); levelTex.push(t); return t; };
 
   /* ---- textures ---- */
@@ -319,6 +379,19 @@ floorTex = LT(512, 512, (g, w, h) => {
     g.fillStyle = `rgba(0,0,0,${rnd(.1, .35)})`; g.beginPath(); g.arc(rnd(0, w), rnd(0, h), rnd(6, 40), 0, 7); g.fill();
   }
 }, N * 1.2, N * 1.2);
+  } else if (n === 4) {
+    wallTex = LT(512, 512, (g, w, h) => {                       // dark basalt, algae and barnacles
+      g.fillStyle = '#1c2429'; g.fillRect(0, 0, w, h); grain(g, w, h, 44);
+      for (let i = 0; i < 26; i++) { g.fillStyle = `rgba(8,12,14,${rnd(.15, .4)})`; g.fillRect(rnd(0, w), 0, rnd(3, 26), h); }
+      for (let i = 0; i < 16; i++) { g.fillStyle = `rgba(30,90,60,${rnd(.12, .3)})`; g.beginPath(); g.arc(rnd(0, w), rnd(h * .3, h), rnd(10, 40), 0, 7); g.fill(); }
+      for (let i = 0; i < 90; i++) { g.fillStyle = `rgba(150,160,150,${rnd(.15, .4)})`; g.beginPath(); g.arc(rnd(0, w), rnd(0, h), rnd(1, 3), 0, 7); g.fill(); }
+    }, 1, 1);
+    floorTex = LT(512, 512, (g, w, h) => {                      // rippled sand
+      g.fillStyle = '#4a5a60'; g.fillRect(0, 0, w, h); grain(g, w, h, 36);
+      for (let y = 0; y < h; y += 10) { g.strokeStyle = `rgba(20,30,34,${rnd(.15, .35)})`; g.lineWidth = 2; g.beginPath(); g.moveTo(0, y);
+        for (let x = 0; x <= w; x += 16) g.lineTo(x, y + Math.sin(x * .05 + y) * 3); g.stroke(); }
+      for (let i = 0; i < 30; i++) { g.fillStyle = `rgba(10,20,24,${rnd(.1, .3)})`; g.beginPath(); g.arc(rnd(0, w), rnd(0, h), rnd(8, 34), 0, 7); g.fill(); }
+    }, N * 1.2, N * 1.2);
   } else if (n === 3) {
     wallTex = LT(512, 512, (g, w, h) => {                       // grimy concrete panels with a hazard stripe
       g.fillStyle = '#7d848c'; g.fillRect(0, 0, w, h); grain(g, w, h, 40);
@@ -368,11 +441,13 @@ floorTex = LT(512, 512, (g, w, h) => {
   const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: n === 1 ? .96 : .78, metalness: 0 });
   const walls = [];
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) if (grid[j][i] === 1) walls.push([i, j]);
-  wallMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(T, H, T), wallMat, walls.length);
+  wallMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(T, n === 4 ? H * 2.4 : H, T), wallMat, walls.length);
   {
     const m = new THREE.Matrix4(), col = new THREE.Color();
     walls.forEach(([i, j], k) => {
-      m.setPosition((i + .5) * T, H / 2, (j + .5) * T); wallMesh.setMatrixAt(k, m);
+      if (n === 4) { const sy = rnd(.45, 1); m.makeScale(1, sy, 1); m.setPosition((i + .5) * T, H * 1.2 * sy, (j + .5) * T); }   // ragged rock tops
+      else m.setPosition((i + .5) * T, H / 2, (j + .5) * T);
+      wallMesh.setMatrixAt(k, m);
       const v = rnd(.55, 1); wallMesh.setColorAt(k, col.setRGB(v, v, v * .97));
     });
     levelGroup.add(wallMesh);
@@ -382,7 +457,7 @@ floorTex = LT(512, 512, (g, w, h) => {
   floor.rotation.x = -Math.PI / 2; floor.position.set(N * T / 2, 0, N * T / 2); levelGroup.add(floor);
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(N * T, N * T),
     new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 1, color: n === 1 ? 0x777777 : 0x555d55 }));
-  ceil.rotation.x = Math.PI / 2; ceil.position.set(N * T / 2, H, N * T / 2); levelGroup.add(ceil);
+  ceil.rotation.x = Math.PI / 2; ceil.position.set(N * T / 2, H, N * T / 2); if (n !== 4) levelGroup.add(ceil);   // open water above
 
   /* ---- decor ---- */
   if (n === 1) {
@@ -406,6 +481,17 @@ floorTex = LT(512, 512, (g, w, h) => {
   }
 }
 
+  } else if (n === 4) {
+    // swaying kelp forest
+    const open = cells.filter(c => c.d >= 0), cnt = 170;
+    const kelp = new THREE.InstancedMesh(new THREE.CylinderGeometry(.03, .07, 2.8, 5), new THREE.MeshStandardMaterial({ color: 0x1f5a3a, roughness: .8 }), cnt);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), pv = new THREE.Vector3();
+    for (let k = 0; k < cnt; k++) {
+      const c = open[(Math.random() * open.length) | 0], hgt = rnd(.5, 1.5);
+      e.set(rnd(-.15, .15), 0, rnd(-.15, .15)); q.setFromEuler(e); sc.set(1, hgt, 1);
+      pv.set((c.i + .5) * T + rnd(-1.2, 1.2), 1.4 * hgt, (c.j + .5) * T + rnd(-1.2, 1.2)); m.compose(pv, q, sc); kelp.setMatrixAt(k, m);
+    }
+    levelGroup.add(kelp);
   } else if (n === 3) {
     // fluorescent ceiling strips scattered through the halls
     const open = cells.filter(c => c.d > 1).sort(() => Math.random() - .5).slice(0, 46);
@@ -464,7 +550,9 @@ floorTex = LT(512, 512, (g, w, h) => {
 
   /* ---- relics (halls) / levers (sewers) ---- */
   relics = []; levers = [];
-  if (n === 1) {
+  if (n === 4) {
+    relics = relicCells.map((c, idx) => makeFragment(c, idx));
+  } else if (n === 1) {
     relics = relicCells.map((c, idx) => {
       const g = new THREE.Group();
       const core = new THREE.Mesh(new THREE.OctahedronGeometry(.13), new THREE.MeshBasicMaterial({ color: 0xffb050, fog: false }));
@@ -480,7 +568,7 @@ floorTex = LT(512, 512, (g, w, h) => {
   }
 
   /* ---- exit sigil ---- */
-  exitObj = (() => {
+  exitObj = n === 4 ? makeSub() : (() => {
     const g = new THREE.Group();
     const mat = new THREE.MeshBasicMaterial({ color: 0xaa1010, fog: false });
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(.14, .14, 2.6, 12), mat); pillar.position.y = 1.3;
@@ -667,6 +755,48 @@ const chainman = (() => {
            mode: 'search', wait: 0, wp: null, last: null, gk: '', gf: null, heading: 0, poseAcc: 0, sndT: 3,
            moving: false, mx: 0, mz: 1, hx: 0, hy: 0, hz: 0, lunge: { phase: 'none', t: 0 }, lastLunge: -99, lift: 0 };
 })();
+/* ---------- the leviathan (ocean) ---------- */
+const leviathan = (() => {
+  const group = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0x0f161b, roughness: .45, metalness: .15 });
+  const belly = new THREE.MeshStandardMaterial({ color: 0x1b2a2e, roughness: .6 });
+  const lum = new THREE.MeshBasicMaterial({ color: 0x5ff0e0 });
+  const eyeM = new THREE.MeshBasicMaterial({ color: 0xe8fff4, fog: false });
+  const toothM = new THREE.MeshStandardMaterial({ color: 0xd9d4c4, roughness: .35 });
+  const glowAt = (col, sz, x, y, z, parent) => {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true }));
+    sp.scale.set(sz, sz, sz); sp.position.set(x, y, z); parent.add(sp); return sp;
+  };
+  const head = new THREE.Group(); group.add(head);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(1.6, 20, 14), skin); skull.scale.set(1.05, .75, 1.5); skull.position.y = .2; head.add(skull);
+  const jaw = new THREE.Group(); jaw.position.set(0, -.45, -.6); head.add(jaw);
+  const jawM = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 10), belly); jawM.scale.set(.95, .3, 1.6); jawM.position.set(0, -.15, 1.6); jaw.add(jawM);
+  for (let i = 0; i < 9; i++) for (const sx of [-1, 1]) {
+    const up = new THREE.Mesh(new THREE.ConeGeometry(.09, .75, 5), toothM); up.rotation.x = Math.PI; up.position.set(sx * (1.0 - i * .05), -.8, .3 + i * .27); head.add(up);
+    const lo = new THREE.Mesh(new THREE.ConeGeometry(.08, .6, 5), toothM); lo.position.set(sx * (.9 - i * .04), .35, .9 + i * .27); jaw.add(lo);
+  }
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(.2, 10, 8), eyeM); eye.position.set(sx * 1.05, .55, 1.0); head.add(eye);
+    glowAt(0xaaffee, 1.6, sx * 1.05, .55, 1.0, head);
+  }
+  const lure = new THREE.Group(); lure.position.set(0, .95, .9); lure.rotation.x = 1.0; head.add(lure);    // anglerfish lure: a warning light
+  const stalk = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 3.4, 6), skin); stalk.position.y = 1.7; lure.add(stalk);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(.22, 10, 8), lum); bulb.position.y = 3.4; lure.add(bulb);
+  glowAt(0x40ffe0, 4, 0, 3.4, 0, lure);
+  const radii = [1.5, 1.7, 1.65, 1.5, 1.35, 1.2, 1.05, .9, .75, .6, .45, .3], segs = [];
+  radii.forEach((r, i) => {
+    const sg = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), skin); sg.scale.set(1, .9, 1.35); sg.position.set(0, 0, -2.2 - i * 1.5); group.add(sg); segs.push(sg);
+    for (const sx of [-1, 1]) { const d = new THREE.Mesh(new THREE.SphereGeometry(.08, 6, 5), lum); d.position.set(sx * r * .95, r * .25, 0); sg.add(d); }
+    if (i === 2) for (const sx of [-1, 1]) { const fin = new THREE.Mesh(new THREE.ConeGeometry(1.1, 3.2, 3), skin); fin.rotation.z = -sx * 1.35; fin.scale.z = .12; fin.position.set(sx * 1.7, -.4, 0); sg.add(fin); }
+  });
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(.9, 2.4, 3), skin); tail.rotation.x = -Math.PI / 2; tail.scale.z = .15; tail.position.z = -1.6; segs[segs.length - 1].add(tail);
+  group.visible = false; scene.add(group);
+  const p = tileCenter(enemyCell.i, enemyCell.j);
+  return { group, m: { head, jaw, segs, lure }, pos: new THREE.Vector3(p.x, 0, p.z), kind: 'leviathan', jawA: 0,
+           field: null, pathT: 0, lastScream: -99, groanT: 0, wasHunt: false, dist: 99, phase: 0,
+           mode: 'search', wait: 0, wp: null, last: null, gk: '', gf: null, heading: 0, poseAcc: 0, sndT: 3,
+           moving: false, mx: 0, mz: 1, hx: 0, hy: 0, hz: 0, lunge: { phase: 'none', t: 0 }, lastLunge: -99, lift: 0 };
+})();
 let E = stalker;      // the active enemy for the current level
 
 /* ============================================================
@@ -747,6 +877,7 @@ const SFX = {
   ambient(origin) {
     if (LEVEL === 2) return this.ambientSewer(origin);
     if (LEVEL === 3) return this.ambientFacility(origin);
+    if (LEVEL === 4) return this.ambientOcean(origin);
     const a = Math.random() * 6.28, r = rnd(6, 14);
     const p = { x: origin.x + Math.cos(a) * r, y: 1.5, z: origin.z + Math.sin(a) * r };
     const k = Math.random();
@@ -847,6 +978,15 @@ const SFX = {
 
     setTimeout(() => p.disconnect(), (D + .6) * 1000);
   },
+  ambientOcean(origin) {
+    const a = Math.random() * 6.28, r = rnd(8, 20), p = { x: origin.x + Math.cos(a) * r, y: 1.6, z: origin.z + Math.sin(a) * r };
+    const k = Math.random();
+    if (k < .4) { this.tone(1400, 1400, .7, 'sine', .12, p); this.tone(1400, 1400, .9, 'sine', .05, p, .35); }                          // distant sonar ping
+    else if (k < .7) { this.tone(70, 42, 2.4, 'sine', .35, p); this.tone(105, 60, 2, 'sine', .1, p, .2); }                           // far-off whale song
+    else { for (let i = 0; i < 4; i++) this.tone(500 + i * 90, 900 + i * 120, .12, 'sine', .1, p, i * rnd(.1, .3)); }                  // bubbles
+  },
+  leviathan(pos, hunt) { this.tone(48, 28, 2.8, 'sine', .5, pos); this.tone(56, 36, 2.4, 'sawtooth', hunt ? .16 : .08, pos, .15); this.noise(1.8, hunt ? .35 : .18, 220, 'lowpass', 1, pos); },
+  leviathanRoar(pos) { this.tone(95, 38, 2.2, 'sawtooth', .42, pos); this.tone(140, 55, 2, 'square', .16, pos, .1); this.noise(2.1, .6, 700, 'bandpass', 1, pos); this.tone(40, 24, 2.6, 'sine', .6, pos); },
   ambientFacility(origin) {
     const a = Math.random() * 6.28, r = rnd(5, 14), p = { x: origin.x + Math.cos(a) * r, y: 1.4, z: origin.z + Math.sin(a) * r };
     const k = Math.random();
@@ -865,8 +1005,8 @@ const SFX = {
   },
   setTheme(n) {
     if (!this.ctx) return; const t = this.ctx.currentTime;
-    this.wb.frequency.setValueAtTime(n === 2 ? 210 : n === 3 ? 320 : 420, t); this.wb.Q.value = n === 2 ? 1.1 : .6;
-    this.wg.gain.setValueAtTime(n === 2 ? .11 : n === 3 ? .07 : .05, t);
+    this.wb.frequency.setValueAtTime(n === 2 ? 210 : n === 3 ? 320 : n === 4 ? 150 : 420, t); this.wb.Q.value = n === 2 ? 1.1 : .6;
+    this.wg.gain.setValueAtTime(n === 2 ? .11 : n === 3 ? .07 : n === 4 ? .1 : .05, t);
   },
   lever(pos) {
     this.tone(150, 55, .35, 'square', .32, pos); this.noise(.3, .9, 1800, 'bandpass', 5, pos);
@@ -1013,14 +1153,14 @@ function placeAtStart() {
 }
 function resetGame() {
   Object.assign(S, { state: 'play', relics: 0, need: LV.need, battery: 1, stamina: 1, flashOn: true, flashLocked: false, flicker: 0,
-                     grace: LV.grace, stepAcc: 0, heartT: 0, ambT: 12, deadT: 0, doorMsgT: 0, nearLever: null, pullReq: false });
+                     grace: LV.grace, stepAcc: 0, heartT: 0, ambT: 12, deadT: 0, doorMsgT: 0, nearLever: null, pullReq: false, repairT: 0, repairing: false, clankT: 0 });
   relics.forEach(r => { r.collected = false; r.group.visible = true; });
   levers.forEach(l => { l.pulled = false; l.anim = 0; l.lamp.material.color.set(0xff2010); l.glow.material.color.set(0xff4020); l.pivot.rotation.x = -.8; if (l.cap) l.cap.position.z = .1; });
   exitObj.open = false; exitObj.mat.color.set(0xaa1010); exitObj.glow.material.color.set(0xff2020);
-  stalker.group.visible = false; spider.group.visible = false; chainman.group.visible = false;
+  stalker.group.visible = false; spider.group.visible = false; chainman.group.visible = false; leviathan.group.visible = false;
   const p = tileCenter(enemyCell.i, enemyCell.j); E.pos.copy(p); E.field = null;
   Object.assign(E, { mode: 'search', wait: 0, wp: null, last: null, gk: '', gf: null, heading: 0, sndT: 3, groanT: 0, wasHunt: false, lastScream: -99,
-                     lunge: { phase: 'none', t: 0 }, lastLunge: -99, lift: 0 });
+                     lunge: { phase: 'none', t: 0 }, lastLunge: -99, lift: 0, jawA: 0 });
   if (E.kind === 'stalker') E.m.spine.rotation.set(.22, 0, 0);
   S.sprinting = false;
   fade.material.opacity = 0; fade.material.color.set(0x300000);
@@ -1033,12 +1173,13 @@ function applyTheme(n) {
   const t = THEMES[n];
   scene.fog.color.setHex(t.fog); scene.fog.density = t.dens; scene.background.setHex(t.fog);
   ambient.color.setHex(t.amb); ambient.intensity = t.ambI; headLamp.color.setHex(t.head);
-  dust.material.color.setHex(t.dust);
+  dust.material.color.setHex(t.dust); dust.material.size = n === 4 ? .04 : .02;
+  headLamp.intensity = t.headI ?? .9; flash.spot.distance = n === 4 ? 34 : 20; flash.spot.color.setHex(n === 4 ? 0xd8f0ff : 0xfff0d0);
   SFX.setTheme(n);
 }
 function loadLevel(n) {            // build a fresh level and start it
   buildLevel(n); applyTheme(n);
-  E = n === 3 ? chainman : n === 2 ? spider : stalker;
+  E = n === 4 ? leviathan : n === 3 ? chainman : n === 2 ? spider : stalker;
   resetGame();
 }
 function restartGame() { if (S.state === 'won') loadLevel(1); else resetGame(); }
@@ -1164,21 +1305,21 @@ const isPaused = () => !renderer.xr.isPresenting && S.state !== 'menu' && !desk.
 
 /* ---------- start / VR session wiring ---------- */
 let localMode = false;   // true when the headset only offers 'local' (no floor) space
-const vrBtn = $('vrBtn'), vrSkipBtn = $('vrSkipBtn'), vrSkipBtn3 = $('vrSkipBtn3'), vrStatus = $('vrStatus');
+const vrBtn = $('vrBtn'), vrSkipBtn = $('vrSkipBtn'), vrSkipBtn3 = $('vrSkipBtn3'), vrSkipBtn4 = $('vrSkipBtn4'), vrStatus = $('vrStatus');
 let startLevel = 1;      // which level the next game starts on
 (async function checkXR() {
-  const off = (label, msg) => { vrBtn.textContent = label; vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = true; vrStatus.textContent = msg; };
+  const off = (label, msg) => { vrBtn.textContent = label; vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = vrSkipBtn4.disabled = true; vrStatus.textContent = msg; };
   if (!window.isSecureContext) return off('VR UNAVAILABLE', 'WebXR requires HTTPS (or http://localhost). Open this page through a secure URL – see the instructions.');
   if (!navigator.xr) return off('VR UNAVAILABLE', 'This browser has no WebXR support. Use Meta Quest Browser, Pico Browser, or desktop Chrome/Edge with a headset (or the Immersive Web Emulator extension).');
   try {
     if (!(await navigator.xr.isSessionSupported('immersive-vr'))) return off('NO VR HEADSET FOUND', 'Connect/wake your headset (SteamVR / Oculus Link / Virtual Desktop) and reload, or play on desktop.');
   } catch (e) { return off('VR UNAVAILABLE', 'WebXR check failed: ' + e.message); }
-  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = false; vrBtn.textContent = 'ENTER VR';
+  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = vrSkipBtn4.disabled = false; vrBtn.textContent = 'ENTER VR';
 })();
 async function startVR(lvl) {
   startLevel = lvl;
   SFX.init();                                  // must run inside the click (user gesture) for audio
-  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = true; vrStatus.textContent = 'Starting VR…';
+  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = vrSkipBtn4.disabled = true; vrStatus.textContent = 'Starting VR…';
   try {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
     const hasFloor = !session.enabledFeatures || session.enabledFeatures.includes('local-floor');
@@ -1189,15 +1330,17 @@ async function startVR(lvl) {
   } catch (e) {
     vrStatus.textContent = 'Could not start VR: ' + (e && e.message || e);
   }
-  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = false;
+  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = vrSkipBtn4.disabled = false;
 }
 vrBtn.addEventListener('click', () => startVR(1));
 vrSkipBtn.addEventListener('click', () => startVR(2));
 vrSkipBtn3.addEventListener('click', () => startVR(3));
+vrSkipBtn4.addEventListener('click', () => startVR(4));
 const startDesktop = lvl => { startLevel = lvl; SFX.init(); $('intro').style.display = 'none'; $('hud').style.display = 'block'; grabMouse(); loadLevel(lvl); };
 $('desktopBtn').addEventListener('click', () => startDesktop(1));
 $('skipBtn').addEventListener('click', () => startDesktop(2));
 $('skipBtn3').addEventListener('click', () => startDesktop(3));
+$('skipBtn4').addEventListener('click', () => startDesktop(4));
 renderer.xr.addEventListener('sessionstart', () => {
   SFX.init(); if (SFX.ctx) SFX.ctx.resume();
   $('intro').style.display = 'none'; $('hud').style.display = 'none';
@@ -1219,9 +1362,9 @@ addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; cam
 function kill() {
   S.state = 'dead'; S.deadT = 0;
   camera.getWorldPosition(v1); camera.getWorldDirection(v2); v2.y = 0; v2.normalize();
-  const kd = E.kind === 'spider' ? 1.9 : 1.3;
+  const kd = E.kind === 'leviathan' ? 4.5 : E.kind === 'spider' ? 1.9 : 1.3;
   E.pos.set(v1.x + v2.x * kd, 0, v1.z + v2.z * kd); E.lunge.phase = 'none'; E.lift = 0;
-  SFX.scream(); if (E.kind === 'spider') SFX.screech(E.pos, 'shriek'); else if (E.kind === 'chain') SFX.sawRev(E.pos); SFX.stalkLevel(0);
+  SFX.scream(); if (E.kind === 'spider') SFX.screech(E.pos, 'shriek'); else if (E.kind === 'chain') SFX.sawRev(E.pos); else if (E.kind === 'leviathan') SFX.leviathanRoar(E.pos); SFX.stalkLevel(0);
   fade.material.color.set(0x550000);
 }
 function lerpAngle(a, b, t) {
@@ -1285,7 +1428,20 @@ function poseDeadStalker() {
     a.sh.rotation.set(-2.2 + Math.sin(t * 25) * .1, 0, s * .3); a.el.rotation.set(-.2, 0, 0); a.hand.rotation.set(-.6, 0, 0); }
 }
 
-function poseDead() { if (E.kind === 'spider') poseDeadSpider(); else if (E.kind === 'chain') poseDeadChain(); else poseDeadStalker(); }
+function poseDead() { if (E.kind === 'spider') poseDeadSpider(); else if (E.kind === 'chain') poseDeadChain(); else if (E.kind === 'leviathan') poseDeadLeviathan(); else poseDeadStalker(); }
+function poseDeadLeviathan() {
+  const M = E.m; E.jawA = lerp(E.jawA, 1.15, .15); M.jaw.rotation.x = E.jawA; M.head.rotation.y = Math.sin(S.t * 6) * .08;
+}
+function poseLeviathan(dt) {
+  const M = E.m, hunt = E.mode === 'hunt', t = S.t, k = 1 - Math.exp(-dt * 5);
+  const amp = E.moving ? (hunt ? 1.5 : 1) : .45, ph = E.moving ? E.phase : t * 1.1;
+  M.segs.forEach((sg, i) => { sg.position.x = lerp(sg.position.x, Math.sin(ph - i * .6) * (.12 + i * .1) * amp, k * 2); sg.position.y = Math.sin(ph * .6 - i * .5) * .18 * amp; });
+  const near = hunt && E.dist < 14;
+  E.jawA = lerp(E.jawA, near ? .75 + Math.sin(t * 7) * .12 : hunt ? .35 : .06, k);
+  M.jaw.rotation.x = E.jawA;
+  M.head.rotation.y = lerp(M.head.rotation.y, Math.sin(ph) * .1 * amp, k);
+  M.lure.rotation.z = Math.sin(t * 1.3) * .12;
+}
 function poseDeadChain() {
   const M = E.m, t = S.t;
   M.spine.rotation.x = lerp(M.spine.rotation.x, .75, .2);
@@ -1374,21 +1530,22 @@ function updateEnemy(dt) {
     E.pathT = .35; E.field = bfs(clamp(Math.floor(v1.x / T), 0, N - 1), clamp(Math.floor(v1.z / T), 0, N - 1));
   }
   const ei = clamp(Math.floor(E.pos.x / T), 0, N - 1), ej = clamp(Math.floor(E.pos.z / T), 0, N - 1);
-  const spd = E.kind === 'spider', chn = E.kind === 'chain', wm = spd ? .35 : 1;
+  const spd = E.kind === 'spider', chn = E.kind === 'chain', lev = E.kind === 'leviathan', wm = spd ? .35 : 1;
   // Detection is line-of-sight ONLY: monsters cannot sense you through walls.
-  const range = (spd ? 22 : 18) + (S.sprinting ? 8 : 0) + (S.flashOn ? (spd ? 4 : 3) : 0);
+  const range = lev ? 16 + (S.sprinting ? 6 : 0) + (S.flashOn ? 12 : 0)      // light draws the leviathan
+                      : (spd ? 22 : 18) + (S.sprinting ? 8 : 0) + (S.flashOn ? (spd ? 4 : 3) : 0);
   const aware = S.grace <= 0 && los && (dist < range || (seen && dist < 24));
   if (aware) { E.mode = 'hunt'; if (!E.last) E.last = new THREE.Vector3(); E.last.set(v1.x, 0, v1.z); }
   else if (E.mode === 'hunt') { E.mode = 'investigate'; E.wait = 0; }   // lost you: go to where you were last sensed
 
   E.moving = false;
   if (S.grace <= 0) {
-    const base = spd ? 2.4 + S.relics * .2 : chn ? 1.6 + S.relics * .2 : 1.25 + S.relics * .24;           // patrol / search speed
-    const chaseSp = spd ? 4.4 + S.relics * .3 : chn ? 3.2 + S.relics * .25 : 2.35 + S.relics * .22;        // chase speed: faster than your walk (2.0), slower than your sprint (6.4)
+    const base = spd ? 2.4 + S.relics * .2 : chn ? 1.6 + S.relics * .2 : lev ? 1.8 + S.relics * .15 : 1.25 + S.relics * .24;           // patrol / search speed
+    const chaseSp = spd ? 4.4 + S.relics * .3 : chn ? 3.2 + S.relics * .25 : lev ? 3.3 + S.relics * .3 : 2.35 + S.relics * .22;        // chase speed: faster than your walk (2.0), slower than your sprint (6.4)
     const busy = spd && spiderLunge(dt, dx, dz, dist, los);
     if (busy) { /* mid-lunge */ }
     else if (E.mode === 'hunt') {
-      if (los && dist < 7) {                                  // direct charge when close and in view
+      if (los && dist < (lev ? 60 : 7)) {                         // direct charge when close and in view
         const dl = dist || 1, step = Math.min(chaseSp * dt, dl);
         E.pos.x += dx / dl * step; E.pos.z += dz / dl * step; E.mx = dx / dl; E.mz = dz / dl; E.moving = true;
       } else stepField(E.field, ei, ej, v1.x, v1.z, chaseSp, dt);
@@ -1405,7 +1562,7 @@ function updateEnemy(dt) {
         else stepField(goalField(wi, wj), ei, ej, E.wp.x, E.wp.z, base * .7, dt);
       }
     }
-    if (E.moving) E.phase += dt * (spd ? (E.mode === 'hunt' ? 17 : 10) : (E.mode === 'hunt' ? 10 : 4.5));
+    if (E.moving) E.phase += dt * (spd ? (E.mode === 'hunt' ? 17 : 10) : lev ? (E.mode === 'hunt' ? 4 : 2) : (E.mode === 'hunt' ? 10 : 4.5));
   }
   if (spd) resolveCircle(E.pos, .55);
 
@@ -1415,22 +1572,23 @@ function updateEnemy(dt) {
   else if (E.moving) E.heading = lerpAngle(E.heading, Math.atan2(E.mx, E.mz), .12);
   else E.heading += Math.cos(S.t * 1.3) * 1.1 * dt;
 
-  E.group.visible = dist < 30;
-  E.group.position.set(E.pos.x, spd ? E.lift : (E.moving ? Math.abs(Math.sin(E.phase)) * .04 : 0), E.pos.z);
+  E.group.visible = dist < (lev ? 70 : 30);
+  E.group.position.set(E.pos.x, lev ? 2.0 + Math.sin(S.t * .7) * .35 : spd ? E.lift : (E.moving ? Math.abs(Math.sin(E.phase)) * .04 : 0), E.pos.z);
   E.group.rotation.y = E.heading;
-  if (spd) poseSpider(dt); else if (chn) poseChain(dt); else poseMonster(dt);
+  if (spd) poseSpider(dt); else if (chn) poseChain(dt); else if (lev) poseLeviathan(dt); else poseMonster(dt);
 
-  if (dist < (spd ? (E.lunge.phase === 'leap' ? 1.25 : 1.1) : chn ? 1.05 : .8) && S.grace <= 0) kill();
+  if (dist < (spd ? (E.lunge.phase === 'leap' ? 1.25 : 1.1) : chn ? 1.05 : lev ? 3.2 : .8) && S.grace <= 0) kill();
 
   // creepy clicks / skittering
   E.sndT -= dt;
-  if (E.sndT <= 0 && dist < 34) {
+  if (E.sndT <= 0 && dist < (lev ? 70 : 34)) {
     const r = Math.random();
     if (spd) {
       if (E.mode === 'hunt') { SFX.monster(E.pos, r < .75 ? 'click' : 'crackle'); E.sndT = rnd(.09, .2); }
       else if (E.moving) { SFX.monster(E.pos, r < .7 ? 'click' : 'crack'); E.sndT = rnd(.16, .38); }
       else { SFX.monster(E.pos, 'click'); E.sndT = rnd(.8, 1.8); }
     }
+    else if (lev) { SFX.leviathan(E.pos, E.mode === 'hunt' ? 1 : 0); E.sndT = E.mode === 'hunt' ? rnd(2, 3.2) : rnd(4, 7); }
     else if (chn) { SFX.saw(E.pos, E.mode === 'hunt' ? 1 : 0); E.sndT = E.mode === 'hunt' ? rnd(.16, .26) : rnd(.35, .6); }
     else if (E.mode === 'hunt') { SFX.monster(E.pos, r < .55 ? 'click' : r < .8 ? 'crackle' : 'crack'); E.sndT = rnd(.22, .55); }
     else { SFX.monster(E.pos, r < .45 ? 'click' : r < .75 ? 'crack' : 'crackle'); E.sndT = rnd(.9, 2.3); }
@@ -1438,7 +1596,7 @@ function updateEnemy(dt) {
 
   // screams / groans while it hunts you
   if (E.mode === 'hunt' && !E.wasHunt && S.t - E.lastScream > 8) {      // it just locked onto you
-    if (spd) SFX.screech(E.pos, 'shriek'); else if (chn) SFX.sawRev(E.pos); else SFX.groan(E.pos, 'scream');
+    if (spd) SFX.screech(E.pos, 'shriek'); else if (chn) SFX.sawRev(E.pos); else if (lev) SFX.leviathanRoar(E.pos); else SFX.groan(E.pos, 'scream');
     E.lastScream = S.t; E.groanT = rnd(2.4, 3.2);
     if (dist < 18) S.flicker = Math.max(S.flicker, .45);
   }
@@ -1448,6 +1606,7 @@ function updateEnemy(dt) {
     if (E.groanT <= 0 && dist < 40) {
       if (spd) { SFX.screech(E.pos, 'hiss'); E.groanT = rnd(2.5, 4.5); }
       else if (chn) { SFX.sawRev(E.pos); E.groanT = rnd(3, 5); }
+      else if (lev) { SFX.leviathan(E.pos, 1); E.groanT = rnd(3, 5.5); }
       else { SFX.groan(E.pos, Math.random() < .6 ? 'groan' : 'wail'); E.groanT = dist < 10 ? rnd(1.3, 2.2) : rnd(2, 3.4); }
     }
   }
@@ -1510,9 +1669,10 @@ function update(dt) {
         r.collected = true; r.group.visible = false; S.relics++;
         SFX.collect(); if (S.relics > 1) S.flicker = 1.1;
         if (S.relics >= S.need) {
-          exitObj.open = true; exitObj.mat.color.set(0x20d060); exitObj.glow.material.color.set(0x30ff80);
-          showMsg('THE SEAL BREAKS', 'Reach the green light. RUN.', 6); SFX.sting();
-        } else showMsg(`RELIC ${S.relics} / ${S.need}`, 'It is getting faster.', 3);
+          if (LEVEL === 4) { showMsg('ALL FRAGMENTS FOUND', 'Return to the submarine and repair it.', 7); SFX.sting(); }
+          else { exitObj.open = true; exitObj.mat.color.set(0x20d060); exitObj.glow.material.color.set(0x30ff80);
+          showMsg('THE SEAL BREAKS', 'Reach the green light. RUN.', 6); SFX.sting(); }
+        } else showMsg(`${LV.label.slice(0, -1)} ${S.relics} / ${S.need}`, 'It is getting faster.', 3);
       }
     }
     // levers (sewers): stand next to one and pull it
@@ -1533,15 +1693,23 @@ function update(dt) {
     // exit
     const ed = Math.hypot(exitObj.pos.x - v1.x, exitObj.pos.z - v1.z);
     S.doorMsgT -= dt;
-    if (ed < 1.4) {
+    if (LEVEL === 4 && !exitObj.open && S.relics >= S.need) {        // repairing the submarine: hold position near it
+      if (ed < 3.4) {
+        if (!S.repairing) { S.repairing = true; showMsg('REPAIRING THE SUBMARINE', 'Hold position…', 5); }
+        S.repairT += dt; S.clankT -= dt;
+        if (S.clankT <= 0) { SFX.lever(exitObj.pos); S.clankT = 1.1; exitObj.mat.color.setHex(Math.random() < .5 ? 0xff8020 : 0x302010); }
+        if (S.repairT >= 5) { exitObj.open = true; exitObj.mat.color.set(0x20d060); exitObj.glow.material.color.set(0x30ff80); SFX.sting(); }
+      } else if (S.repairing) { S.repairing = false; S.repairT = 0; showMsg('REPAIRS INTERRUPTED', 'Stay close to the submarine.', 3); }
+    }
+    if (ed < (LEVEL === 4 ? 3.4 : 1.4)) {
       if (exitObj.open) {
         S.deadT = 0; SFX.win(); SFX.stalkLevel(0);
-        if (LEVEL < 3) { S.state = 'trans'; fade.material.color.set(0x000000); showMsg('YOU ESCAPED', LEVEL === 1 ? 'But the way leads down…' : 'But something worse is waiting…', 4); }
+        if (LEVEL < 4) { S.state = 'trans'; fade.material.color.set(0x000000); showMsg('YOU ESCAPED', LEVEL === 1 ? 'But the way leads down…' : LEVEL === 2 ? 'But something worse is waiting…' : 'But the water is rising…', 4); }
         else { S.state = 'won'; showMsg('YOU ESCAPED', 'Squeeze the trigger to play again.', 999); }
       }
       else if (S.doorMsgT <= 0) {
         const left = S.need - S.relics, nm = LV.label.toLowerCase();
-        showMsg('SEALED', `${left} ${left === 1 ? nm.slice(0, -1) : nm} remain${left === 1 ? 's' : ''}.`, 3); S.doorMsgT = 6;
+        showMsg(LEVEL === 4 ? 'DAMAGED SUBMARINE' : 'SEALED', `${left} ${left === 1 ? nm.slice(0, -1) : nm} remain${left === 1 ? 's' : ''}.`, 3); S.doorMsgT = 6;
       }
     }
     // ambient scares
@@ -1549,7 +1717,7 @@ function update(dt) {
   }
   if (S.state === 'dead') {
     fade.material.opacity = clamp(S.deadT / 2.2, 0, .96);
-    E.group.visible = true; E.group.position.copy(E.pos); E.group.rotation.y = Math.atan2(v1.x - E.pos.x, v1.z - E.pos.z);
+    E.group.visible = true; E.group.position.copy(E.pos); if (E.kind === 'leviathan') E.group.position.y = 1.7; E.group.rotation.y = Math.atan2(v1.x - E.pos.x, v1.z - E.pos.z);
     poseDead();
     if (S.deadT > 2.4 && msgT <= 0) showMsg('YOU DIED', 'Squeeze the trigger / press R to try again.', 999);
   }
