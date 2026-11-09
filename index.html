@@ -16,6 +16,9 @@
     letter-spacing:.2em;cursor:pointer}
   #desktopBtn:hover,#skipBtn:hover,#vrSkipBtn:hover:not(:disabled),#vrBtn:hover:not(:disabled){background:#1a1712}
   #skipBtn,#vrSkipBtn{margin-top:10px;font-size:13px;padding:9px 20px;border-color:#3f4a3c;color:#8fa088}
+  #skipBtn3,#vrSkipBtn3{margin-top:10px;background:none;border:1px solid #3f4a52;color:#8a9aa8;font:inherit;font-size:13px;letter-spacing:.2em;padding:9px 20px;cursor:pointer}
+  #skipBtn3:hover,#vrSkipBtn3:hover:not(:disabled){background:#1a1712}
+  #vrSkipBtn3:disabled{opacity:.45;cursor:default;border-color:#4a4438;background:none}
   #vrSkipBtn:disabled{opacity:.45;cursor:default;border-color:#4a4438;background:none}
   #vrBtn{margin-top:18px;background:#2a0d0d;border:1px solid #8a3a30;color:#e0cfc0;padding:16px 34px;font:inherit;
     font-size:18px;letter-spacing:.2em;cursor:pointer}
@@ -47,9 +50,11 @@
   <p style="color:#6d6757;font-size:13px">Headphones strongly recommended.</p>
   <button id="vrBtn" disabled>CHECKING VR…</button>
   <button id="vrSkipBtn" disabled>VR · SKIP TO LEVEL 2</button>
+  <button id="vrSkipBtn3" disabled>VR · SKIP TO LEVEL 3</button>
   <div id="vrStatus" style="font-size:13px;color:#8d8676;margin-top:8px;max-width:560px"></div>
   <button id="desktopBtn">PLAY ON DESKTOP</button>
   <button id="skipBtn">SKIP TO LEVEL 2</button>
+  <button id="skipBtn3">SKIP TO LEVEL 3</button>
   <div id="err"></div>
 </div>
 <div id="pause"><div><h2>PAUSED</h2><p>Click to resume</p>
@@ -213,7 +218,9 @@ const THEMES = {
   1: { label: 'RELICS', need: 5, grace: 18, fog: 0x020304, dens: .085, amb: 0x1a2630, ambI: .9, head: 0x7f8d9c, dust: 0x8a8a7a,
        title: 'FIND THE RELICS', sub: 'Do not let it see you.' },
   2: { label: 'LEVERS', need: 4, grace: 16, fog: 0x020a05, dens: .078, amb: 0x1d3a28, ambI: 1.0, head: 0x7fa88a, dust: 0x6f8a6a,
-       title: 'THE SEWERS', sub: 'Pull all 4 levers. It is fast.' }
+       title: 'THE SEWERS', sub: 'Pull all 4 levers. It is fast.' },
+  3: { label: 'BUTTONS', need: 6, grace: 16, fog: 0x04070b, dens: .072, amb: 0x2a3644, ambI: 1.0, head: 0xa9c0d6, dust: 0x9aa4ae,
+       title: 'THE FACILITY', sub: 'Find and press all 6 buttons. Listen for the saw.' }
 };
 let LEVEL = 1, LV = THEMES[1], levelGroup = null, levelTex = [], wallMesh = null, relics = [], levers = [], exitObj = null;
 
@@ -240,6 +247,26 @@ function makeLever(c, idx) {
   return { group: g, pivot, lamp, glow, pulled: false, anim: 0, phase: idx * 1.3, pos: new THREE.Vector3(g.position.x, 1.1, g.position.z) };
 }
 
+function makeButton(c, idx) {
+  const g = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0x6b7480, roughness: .45, metalness: .7 });
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(.5, .7, .12), steel); panel.position.y = 1.15;
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(.11, .11, .1, 16), new THREE.MeshStandardMaterial({ color: 0xc02018, roughness: .35, emissive: 0x400805 }));
+  cap.rotation.x = Math.PI / 2; cap.position.set(0, 1.2, .1);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(.05, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff2010, fog: false })); lamp.position.set(0, .93, .08);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff4020, blending: THREE.AdditiveBlending,
+                                                         depthWrite: false, fog: false, transparent: true }));
+  glow.scale.set(1.1, 1.1, 1.1); glow.position.set(0, 1.2, .2);
+  const pivot = new THREE.Group();            // unused by buttons; keeps the shared reset/animation code happy
+  g.add(panel, cap, lamp, glow, pivot);
+  const dir = D4.find(([dx, dy]) => solid(c.i + dx, c.j + dy));
+  const p = tileCenter(c.i, c.j);
+  if (dir) { g.position.set(p.x + dir[0] * (T / 2 - .08), 0, p.z + dir[1] * (T / 2 - .08)); g.rotation.y = Math.atan2(-dir[0], -dir[1]); }
+  else g.position.set(p.x, 0, p.z);
+  levelGroup.add(g);
+  return { group: g, pivot, cap, lamp, glow, pulled: false, anim: 0, phase: idx * 1.3, pos: new THREE.Vector3(g.position.x, 1.2, g.position.z) };
+}
+
 function buildLevel(n) {
   if (levelGroup) {
     scene.remove(levelGroup);
@@ -252,7 +279,7 @@ function buildLevel(n) {
   }
   levelTex = []; levelGroup = new THREE.Group(); scene.add(levelGroup);
   LEVEL = n; LV = THEMES[n];
-  if (n === 1) carveMaze(CELLS * 2, 0); else carveMaze(Math.round(CELLS * 3.5), 4);
+  if (n === 1) carveMaze(CELLS * 2, 0); else carveMaze(Math.round(CELLS * 3.5), n === 3 ? 7 : 4);
   planLevel(LV.need);
   const LT = (...a) => { const t = canvasTex(...a); levelTex.push(t); return t; };
 
@@ -292,6 +319,26 @@ floorTex = LT(512, 512, (g, w, h) => {
     g.fillStyle = `rgba(0,0,0,${rnd(.1, .35)})`; g.beginPath(); g.arc(rnd(0, w), rnd(0, h), rnd(6, 40), 0, 7); g.fill();
   }
 }, N * 1.2, N * 1.2);
+  } else if (n === 3) {
+    wallTex = LT(512, 512, (g, w, h) => {                       // grimy concrete panels with a hazard stripe
+      g.fillStyle = '#7d848c'; g.fillRect(0, 0, w, h); grain(g, w, h, 40);
+      g.strokeStyle = 'rgba(10,12,14,.65)'; g.lineWidth = 3;
+      g.strokeRect(2, 2, w - 4, h - 4); g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h * .86); g.stroke();
+      g.fillStyle = 'rgba(20,22,26,.8)';
+      for (const x of [14, w / 2 - 14, w / 2 + 14, w - 14]) for (const y of [14, h * .86 - 14]) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }
+      const by = h * .88, bh = h * .12; g.fillStyle = '#c9a21c'; g.fillRect(0, by, w, bh);
+      g.fillStyle = '#18181a'; for (let x = -bh; x < w; x += 44) { g.beginPath(); g.moveTo(x, by + bh); g.lineTo(x + 22, by + bh); g.lineTo(x + 22 + bh, by); g.lineTo(x + bh, by); g.fill(); }
+      for (let i = 0; i < 18; i++) { g.fillStyle = `rgba(60,34,18,${rnd(.08, .22)})`; g.fillRect(rnd(0, w), rnd(0, h * .5), rnd(2, 7), rnd(40, 200)); }
+      for (let i = 0; i < 4; i++) { g.fillStyle = `rgba(80,8,8,${rnd(.25, .5)})`; const x = rnd(0, w), y = rnd(0, h * .5); g.fillRect(x, y, rnd(2, 5), rnd(40, 160)); }
+    }, 1, 1);
+    floorTex = LT(512, 512, (g, w, h) => {                      // riveted steel plates
+      g.fillStyle = '#2a3036'; g.fillRect(0, 0, w, h); grain(g, w, h, 34);
+      g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 3;
+      for (let i = 0; i <= 2; i++) { g.beginPath(); g.moveTo(i * w / 2, 0); g.lineTo(i * w / 2, h); g.stroke(); g.beginPath(); g.moveTo(0, i * h / 2); g.lineTo(w, i * h / 2); g.stroke(); }
+      g.fillStyle = 'rgba(120,130,140,.35)';
+      for (let x = 20; x < w; x += 48) for (let y = 20; y < h; y += 48) { g.beginPath(); g.arc(x, y, 2.5, 0, 7); g.fill(); }
+      for (let i = 0; i < 30; i++) { g.fillStyle = `rgba(0,0,0,${rnd(.1, .3)})`; g.beginPath(); g.arc(rnd(0, w), rnd(0, h), rnd(8, 36), 0, 7); g.fill(); }
+    }, N * 1.2, N * 1.2);
   } else {
     wallTex = LT(512, 512, (g, w, h) => {                       // slimy sewer brick
       g.fillStyle = '#1e2420'; g.fillRect(0, 0, w, h);
@@ -359,6 +406,23 @@ floorTex = LT(512, 512, (g, w, h) => {
   }
 }
 
+  } else if (n === 3) {
+    // fluorescent ceiling strips scattered through the halls
+    const open = cells.filter(c => c.d > 1).sort(() => Math.random() - .5).slice(0, 46);
+    const strips = new THREE.InstancedMesh(new THREE.BoxGeometry(1.5, .05, .28), new THREE.MeshBasicMaterial({ color: 0xcfe0f4, fog: false }), open.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3();
+    open.forEach((c, k) => { e.set(0, Math.random() < .5 ? 0 : Math.PI / 2, 0); q.setFromEuler(e);
+      pv.set((c.i + .5) * T, H - .03, (c.j + .5) * T); m.compose(pv, q, sc); strips.setMatrixAt(k, m); });
+    levelGroup.add(strips);
+    // dried blood on the floor
+    const bt = LT(256, 256, (g, w, h) => { for (let i = 0; i < 22; i++) { g.fillStyle = `rgba(${rnd(60, 95) | 0},4,4,${rnd(.3, .8)})`; g.beginPath(); g.ellipse(w / 2 + rnd(-60, 60), h / 2 + rnd(-60, 60), rnd(4, 38), rnd(3, 24), rnd(0, 3), 0, 7); g.fill(); } });
+    const bm = new THREE.MeshStandardMaterial({ map: bt, transparent: true, roughness: .3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const spots = cells.filter(c => c.d > 3);
+    for (let k = 0; k < 18; k++) {
+      const c = spots[(Math.random() * spots.length) | 0];
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(rnd(1.2, 2.4), rnd(1.2, 2.4)), bm);
+      p.rotation.set(-Math.PI / 2, 0, rnd(0, 6.28)); p.position.set((c.i + .5) * T + rnd(-.8, .8), .012, (c.j + .5) * T + rnd(-.8, .8)); levelGroup.add(p);
+    }
   } else {
     // toxic sludge puddles with a faint glow
     const pt = LT(128, 128, (g, w, h) => {
@@ -412,7 +476,7 @@ floorTex = LT(512, 512, (g, w, h) => {
       return { group: g, core, collected: false, phase: idx * 1.7, pos: g.position };
     });
   } else {
-    levers = relicCells.map((c, idx) => makeLever(c, idx));
+    levers = relicCells.map((c, idx) => n === 3 ? makeButton(c, idx) : makeLever(c, idx));
   }
 
   /* ---- exit sigil ---- */
@@ -555,6 +619,54 @@ const spider = (() => {
            mode: 'search', wait: 0, wp: null, last: null, gk: '', gf: null, heading: 0, poseAcc: 0, sndT: 3,
            moving: false, mx: 0, mz: 1, lunge: { phase: 'none', t: 0 }, lastLunge: -99, lift: 0 };
 })();
+/* ---------- the headless chainsaw man (facility) ---------- */
+const chainman = (() => {
+  const group = new THREE.Group();
+  const cloth = new THREE.MeshStandardMaterial({ color: 0x2c3a2a, roughness: .9 });
+  const apron = new THREE.MeshStandardMaterial({ color: 0x3a2118, roughness: .75 });
+  const skinM = new THREE.MeshStandardMaterial({ color: 0x8a6a5c, roughness: .8 });
+  const meat = new THREE.MeshStandardMaterial({ color: 0x5a0a0a, roughness: .35, emissive: 0x240000 });
+  const hang = (r0, r1, len, mat = cloth) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, len, 8), mat); m.position.y = -len / 2; return m; };
+  const piv = (parent, x, y, z) => { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; };
+  const hips = piv(group, 0, .95, 0);
+  const mkLeg = sx => {
+    const hip = piv(hips, sx * .13, 0, 0); hip.add(hang(.09, .07, .46));
+    const knee = piv(hip, 0, -.46, 0); knee.add(hang(.07, .055, .46));
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(.13, .1, .3), new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: .8 })); boot.position.set(0, -.47, .07); knee.add(boot);
+    return { hip, knee };
+  };
+  const legL = mkLeg(-1), legR = mkLeg(1);
+  const spine = piv(hips, 0, 0, 0);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(.25, .2, .72, 10), cloth); torso.position.y = .36; spine.add(torso);
+  const ap = new THREE.Mesh(new THREE.BoxGeometry(.42, .55, .05), apron); ap.position.set(0, .34, .2); spine.add(ap);
+  const head = piv(spine, 0, .72, 0);                          // no head: a raw neck stump
+  const stump = new THREE.Mesh(new THREE.CylinderGeometry(.075, .095, .16, 8), meat); stump.position.y = .08; head.add(stump);
+  const top = new THREE.Mesh(new THREE.SphereGeometry(.075, 8, 6), meat); top.scale.y = .45; top.position.y = .16; head.add(top);
+  const sGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff2010, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true }));
+  sGlow.scale.set(.6, .6, .6); sGlow.position.y = .2; head.add(sGlow);
+  const mkArm = sx => {
+    const sh = piv(spine, sx * .31, .62, 0); sh.add(hang(.07, .058, .34));
+    const el = piv(sh, 0, -.34, 0); el.add(hang(.058, .046, .34));
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(.06, 8, 6), skinM); hand.position.y = -.36; el.add(hand);
+    return { sh, el, hand };
+  };
+  const armL = mkArm(-1), armR = mkArm(1);
+  const saw = piv(spine, 0, .4, .5);                           // the chainsaw, held out in front
+  const body = new THREE.Mesh(new THREE.BoxGeometry(.2, .22, .38), new THREE.MeshStandardMaterial({ color: 0xd2641a, roughness: .5, metalness: .2 })); saw.add(body);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(.05, .2, .22), new THREE.MeshStandardMaterial({ color: 0x151515, roughness: .7 })); grip.position.set(0, .17, -.08); saw.add(grip);
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(.07, .14, 1.0), new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: .35, metalness: .8 })); bar.position.z = .66; saw.add(bar);
+  const toothM = new THREE.MeshStandardMaterial({ color: 0x1a1b1e, roughness: .5, metalness: .6 }), teeth = [];
+  for (let r = 0; r < 2; r++) for (let i = 0; i < 14; i++) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(.09, .03, .05), toothM); t.position.set(0, r ? -.085 : .085, .17 + i * .07); saw.add(t);
+    teeth.push({ mesh: t, z0: .17 + i * .07, dir: r ? -1 : 1 });
+  }
+  group.visible = false; scene.add(group);
+  const p = tileCenter(enemyCell.i, enemyCell.j);
+  return { group, m: { spine, head, armL, armR, legL, legR, saw, teeth }, pos: new THREE.Vector3(p.x, 0, p.z), kind: 'chain',
+           field: null, pathT: 0, lastScream: -99, groanT: 0, wasHunt: false, dist: 99, phase: 0,
+           mode: 'search', wait: 0, wp: null, last: null, gk: '', gf: null, heading: 0, poseAcc: 0, sndT: 3,
+           moving: false, mx: 0, mz: 1, hx: 0, hy: 0, hz: 0, lunge: { phase: 'none', t: 0 }, lastLunge: -99, lift: 0 };
+})();
 let E = stalker;      // the active enemy for the current level
 
 /* ============================================================
@@ -634,6 +746,7 @@ const SFX = {
   win() { [392, 494, 587, 784].forEach((f, i) => this.tone(f, f, 3, 'sine', .16, null, i * .35)); },
   ambient(origin) {
     if (LEVEL === 2) return this.ambientSewer(origin);
+    if (LEVEL === 3) return this.ambientFacility(origin);
     const a = Math.random() * 6.28, r = rnd(6, 14);
     const p = { x: origin.x + Math.cos(a) * r, y: 1.5, z: origin.z + Math.sin(a) * r };
     const k = Math.random();
@@ -734,6 +847,15 @@ const SFX = {
 
     setTimeout(() => p.disconnect(), (D + .6) * 1000);
   },
+  ambientFacility(origin) {
+    const a = Math.random() * 6.28, r = rnd(5, 14), p = { x: origin.x + Math.cos(a) * r, y: 1.4, z: origin.z + Math.sin(a) * r };
+    const k = Math.random();
+    if (k < .4) { this.noise(.35, .5, 300, 'bandpass', 4, p); this.tone(120, 80, .5, 'square', .06, p); }                          // distant metal bang
+    else if (k < .7) { this.tone(60, 60, 1.2, 'sawtooth', .05, p); this.noise(1.2, .12, 3000, 'highpass', .5, p); }                // electrical buzz
+    else { this.tone(70, 170, 1.1, 'sawtooth', .14, p); this.noise(.9, .25, 1200, 'bandpass', 1.5, p); }                           // far-off saw rev
+  },
+  saw(pos, rev) { this.tone(58 + rev * 40, 64 + rev * 55, .22, 'sawtooth', .12 + rev * .12, pos); this.noise(.2, .18 + rev * .25, 700 + rev * 900, 'bandpass', 1.5, pos); },
+  sawRev(pos) { for (let i = 0; i < 5; i++) this.tone(70 + i * 28, 90 + i * 38, .3, 'sawtooth', .25, pos, i * .12); this.noise(.9, .5, 1600, 'bandpass', 1.2, pos); },
   ambientSewer(origin) {
     const a = Math.random() * 6.28, r = rnd(5, 14), p = { x: origin.x + Math.cos(a) * r, y: 1.2, z: origin.z + Math.sin(a) * r };
     const k = Math.random();
@@ -743,8 +865,8 @@ const SFX = {
   },
   setTheme(n) {
     if (!this.ctx) return; const t = this.ctx.currentTime;
-    this.wb.frequency.setValueAtTime(n === 2 ? 210 : 420, t); this.wb.Q.value = n === 2 ? 1.1 : .6;
-    this.wg.gain.setValueAtTime(n === 2 ? .11 : .05, t);
+    this.wb.frequency.setValueAtTime(n === 2 ? 210 : n === 3 ? 320 : 420, t); this.wb.Q.value = n === 2 ? 1.1 : .6;
+    this.wg.gain.setValueAtTime(n === 2 ? .11 : n === 3 ? .07 : .05, t);
   },
   lever(pos) {
     this.tone(150, 55, .35, 'square', .32, pos); this.noise(.3, .9, 1800, 'bandpass', 5, pos);
@@ -893,9 +1015,9 @@ function resetGame() {
   Object.assign(S, { state: 'play', relics: 0, need: LV.need, battery: 1, stamina: 1, flashOn: true, flashLocked: false, flicker: 0,
                      grace: LV.grace, stepAcc: 0, heartT: 0, ambT: 12, deadT: 0, doorMsgT: 0, nearLever: null, pullReq: false });
   relics.forEach(r => { r.collected = false; r.group.visible = true; });
-  levers.forEach(l => { l.pulled = false; l.anim = 0; l.lamp.material.color.set(0xff2010); l.glow.material.color.set(0xff4020); l.pivot.rotation.x = -.8; });
+  levers.forEach(l => { l.pulled = false; l.anim = 0; l.lamp.material.color.set(0xff2010); l.glow.material.color.set(0xff4020); l.pivot.rotation.x = -.8; if (l.cap) l.cap.position.z = .1; });
   exitObj.open = false; exitObj.mat.color.set(0xaa1010); exitObj.glow.material.color.set(0xff2020);
-  stalker.group.visible = false; spider.group.visible = false;
+  stalker.group.visible = false; spider.group.visible = false; chainman.group.visible = false;
   const p = tileCenter(enemyCell.i, enemyCell.j); E.pos.copy(p); E.field = null;
   Object.assign(E, { mode: 'search', wait: 0, wp: null, last: null, gk: '', gf: null, heading: 0, sndT: 3, groanT: 0, wasHunt: false, lastScream: -99,
                      lunge: { phase: 'none', t: 0 }, lastLunge: -99, lift: 0 });
@@ -916,7 +1038,7 @@ function applyTheme(n) {
 }
 function loadLevel(n) {            // build a fresh level and start it
   buildLevel(n); applyTheme(n);
-  E = n === 2 ? spider : stalker;
+  E = n === 3 ? chainman : n === 2 ? spider : stalker;
   resetGame();
 }
 function restartGame() { if (S.state === 'won') loadLevel(1); else resetGame(); }
@@ -1042,21 +1164,21 @@ const isPaused = () => !renderer.xr.isPresenting && S.state !== 'menu' && !desk.
 
 /* ---------- start / VR session wiring ---------- */
 let localMode = false;   // true when the headset only offers 'local' (no floor) space
-const vrBtn = $('vrBtn'), vrSkipBtn = $('vrSkipBtn'), vrStatus = $('vrStatus');
+const vrBtn = $('vrBtn'), vrSkipBtn = $('vrSkipBtn'), vrSkipBtn3 = $('vrSkipBtn3'), vrStatus = $('vrStatus');
 let startLevel = 1;      // which level the next game starts on
 (async function checkXR() {
-  const off = (label, msg) => { vrBtn.textContent = label; vrBtn.disabled = vrSkipBtn.disabled = true; vrStatus.textContent = msg; };
+  const off = (label, msg) => { vrBtn.textContent = label; vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = true; vrStatus.textContent = msg; };
   if (!window.isSecureContext) return off('VR UNAVAILABLE', 'WebXR requires HTTPS (or http://localhost). Open this page through a secure URL – see the instructions.');
   if (!navigator.xr) return off('VR UNAVAILABLE', 'This browser has no WebXR support. Use Meta Quest Browser, Pico Browser, or desktop Chrome/Edge with a headset (or the Immersive Web Emulator extension).');
   try {
     if (!(await navigator.xr.isSessionSupported('immersive-vr'))) return off('NO VR HEADSET FOUND', 'Connect/wake your headset (SteamVR / Oculus Link / Virtual Desktop) and reload, or play on desktop.');
   } catch (e) { return off('VR UNAVAILABLE', 'WebXR check failed: ' + e.message); }
-  vrBtn.disabled = vrSkipBtn.disabled = false; vrBtn.textContent = 'ENTER VR';
+  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = false; vrBtn.textContent = 'ENTER VR';
 })();
 async function startVR(lvl) {
   startLevel = lvl;
   SFX.init();                                  // must run inside the click (user gesture) for audio
-  vrBtn.disabled = vrSkipBtn.disabled = true; vrStatus.textContent = 'Starting VR…';
+  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = true; vrStatus.textContent = 'Starting VR…';
   try {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor'] });
     const hasFloor = !session.enabledFeatures || session.enabledFeatures.includes('local-floor');
@@ -1067,13 +1189,15 @@ async function startVR(lvl) {
   } catch (e) {
     vrStatus.textContent = 'Could not start VR: ' + (e && e.message || e);
   }
-  vrBtn.disabled = vrSkipBtn.disabled = false;
+  vrBtn.disabled = vrSkipBtn.disabled = vrSkipBtn3.disabled = false;
 }
 vrBtn.addEventListener('click', () => startVR(1));
 vrSkipBtn.addEventListener('click', () => startVR(2));
+vrSkipBtn3.addEventListener('click', () => startVR(3));
 const startDesktop = lvl => { startLevel = lvl; SFX.init(); $('intro').style.display = 'none'; $('hud').style.display = 'block'; grabMouse(); loadLevel(lvl); };
 $('desktopBtn').addEventListener('click', () => startDesktop(1));
 $('skipBtn').addEventListener('click', () => startDesktop(2));
+$('skipBtn3').addEventListener('click', () => startDesktop(3));
 renderer.xr.addEventListener('sessionstart', () => {
   SFX.init(); if (SFX.ctx) SFX.ctx.resume();
   $('intro').style.display = 'none'; $('hud').style.display = 'none';
@@ -1097,7 +1221,7 @@ function kill() {
   camera.getWorldPosition(v1); camera.getWorldDirection(v2); v2.y = 0; v2.normalize();
   const kd = E.kind === 'spider' ? 1.9 : 1.3;
   E.pos.set(v1.x + v2.x * kd, 0, v1.z + v2.z * kd); E.lunge.phase = 'none'; E.lift = 0;
-  SFX.scream(); if (E.kind === 'spider') SFX.screech(E.pos, 'shriek'); SFX.stalkLevel(0);
+  SFX.scream(); if (E.kind === 'spider') SFX.screech(E.pos, 'shriek'); else if (E.kind === 'chain') SFX.sawRev(E.pos); SFX.stalkLevel(0);
   fade.material.color.set(0x550000);
 }
 function lerpAngle(a, b, t) {
@@ -1161,7 +1285,30 @@ function poseDeadStalker() {
     a.sh.rotation.set(-2.2 + Math.sin(t * 25) * .1, 0, s * .3); a.el.rotation.set(-.2, 0, 0); a.hand.rotation.set(-.6, 0, 0); }
 }
 
-function poseDead() { if (E.kind === 'spider') poseDeadSpider(); else poseDeadStalker(); }
+function poseDead() { if (E.kind === 'spider') poseDeadSpider(); else if (E.kind === 'chain') poseDeadChain(); else poseDeadStalker(); }
+function poseDeadChain() {
+  const M = E.m, t = S.t;
+  M.spine.rotation.x = lerp(M.spine.rotation.x, .75, .2);
+  for (const s of [-1, 1]) { const a = s < 0 ? M.armL : M.armR; a.sh.rotation.set(-1.5, 0, -s * .25); a.el.rotation.set(-.4, 0, 0); }
+  M.saw.position.x = (Math.random() - .5) * .05; M.saw.rotation.z = (Math.random() - .5) * .1;
+  M.teeth.forEach(tt => { tt.mesh.position.z = .17 + (((tt.z0 - .17 + tt.dir * t * 6) % .98) + .98) % .98; });
+}
+function poseChain(dt) {
+  const M = E.m, ph = E.phase, k = 1 - Math.exp(-dt * 12), hunt = E.mode === 'hunt', mv = E.moving, t = S.t;
+  const set = (o, x, y, z) => { o.rotation.x = lerp(o.rotation.x, x, k); o.rotation.y = lerp(o.rotation.y, y, k); o.rotation.z = lerp(o.rotation.z, z, k); };
+  const a = Math.sin(ph), b = Math.sin(ph + Math.PI), amp = hunt ? .9 : .5;
+  if (mv) {
+    set(M.legL.hip, a * amp, 0, 0); set(M.legL.knee, .15 + Math.max(0, Math.sin(ph + 1.4)) * .9 * amp, 0, 0);
+    set(M.legR.hip, b * amp, 0, 0); set(M.legR.knee, .15 + Math.max(0, Math.sin(ph + 1.4 + Math.PI)) * .9 * amp, 0, 0);
+  } else for (const l of [M.legL, M.legR]) { set(l.hip, 0, 0, 0); set(l.knee, .05, 0, 0); }
+  set(M.spine, hunt && mv ? .35 : .1, hunt && mv ? Math.sin(ph) * .12 : Math.sin(t * .7) * .15, 0);
+  for (const sd of [-1, 1]) { const arm = sd < 0 ? M.armL : M.armR; set(arm.sh, -1.1, 0, -sd * .28); set(arm.el, -.45, 0, 0); }
+  const vib = hunt ? 1 : .3;                                 // the saw shudders, harder when it is revved
+  M.saw.position.x = (Math.random() - .5) * .03 * vib; M.saw.rotation.z = (Math.random() - .5) * .06 * vib;
+  const sp = hunt ? 6 : 1.8;
+  M.teeth.forEach(tt => { tt.mesh.position.z = .17 + (((tt.z0 - .17 + tt.dir * t * sp) % .98) + .98) % .98; });
+}
+
 function poseDeadSpider() {
   const M = E.m, t = S.t;
   M.body.position.y = lerp(M.body.position.y, 1.15, .1); M.body.rotation.x = lerp(M.body.rotation.x, -.65, .1);
@@ -1227,7 +1374,7 @@ function updateEnemy(dt) {
     E.pathT = .35; E.field = bfs(clamp(Math.floor(v1.x / T), 0, N - 1), clamp(Math.floor(v1.z / T), 0, N - 1));
   }
   const ei = clamp(Math.floor(E.pos.x / T), 0, N - 1), ej = clamp(Math.floor(E.pos.z / T), 0, N - 1);
-  const spd = E.kind === 'spider', wm = spd ? .35 : 1;
+  const spd = E.kind === 'spider', chn = E.kind === 'chain', wm = spd ? .35 : 1;
   // Detection is line-of-sight ONLY: monsters cannot sense you through walls.
   const range = (spd ? 22 : 18) + (S.sprinting ? 8 : 0) + (S.flashOn ? (spd ? 4 : 3) : 0);
   const aware = S.grace <= 0 && los && (dist < range || (seen && dist < 24));
@@ -1236,8 +1383,8 @@ function updateEnemy(dt) {
 
   E.moving = false;
   if (S.grace <= 0) {
-    const base = spd ? 2.4 + S.relics * .2 : 1.25 + S.relics * .24;           // patrol / search speed
-    const chaseSp = spd ? 4.4 + S.relics * .3 : 2.35 + S.relics * .22;        // chase speed: faster than your walk (2.0), slower than your sprint (6.4)
+    const base = spd ? 2.4 + S.relics * .2 : chn ? 1.6 + S.relics * .2 : 1.25 + S.relics * .24;           // patrol / search speed
+    const chaseSp = spd ? 4.4 + S.relics * .3 : chn ? 3.2 + S.relics * .25 : 2.35 + S.relics * .22;        // chase speed: faster than your walk (2.0), slower than your sprint (6.4)
     const busy = spd && spiderLunge(dt, dx, dz, dist, los);
     if (busy) { /* mid-lunge */ }
     else if (E.mode === 'hunt') {
@@ -1271,9 +1418,9 @@ function updateEnemy(dt) {
   E.group.visible = dist < 30;
   E.group.position.set(E.pos.x, spd ? E.lift : (E.moving ? Math.abs(Math.sin(E.phase)) * .04 : 0), E.pos.z);
   E.group.rotation.y = E.heading;
-  if (spd) poseSpider(dt); else poseMonster(dt);
+  if (spd) poseSpider(dt); else if (chn) poseChain(dt); else poseMonster(dt);
 
-  if (dist < (spd ? (E.lunge.phase === 'leap' ? 1.25 : 1.1) : .8) && S.grace <= 0) kill();
+  if (dist < (spd ? (E.lunge.phase === 'leap' ? 1.25 : 1.1) : chn ? 1.05 : .8) && S.grace <= 0) kill();
 
   // creepy clicks / skittering
   E.sndT -= dt;
@@ -1284,13 +1431,14 @@ function updateEnemy(dt) {
       else if (E.moving) { SFX.monster(E.pos, r < .7 ? 'click' : 'crack'); E.sndT = rnd(.16, .38); }
       else { SFX.monster(E.pos, 'click'); E.sndT = rnd(.8, 1.8); }
     }
+    else if (chn) { SFX.saw(E.pos, E.mode === 'hunt' ? 1 : 0); E.sndT = E.mode === 'hunt' ? rnd(.16, .26) : rnd(.35, .6); }
     else if (E.mode === 'hunt') { SFX.monster(E.pos, r < .55 ? 'click' : r < .8 ? 'crackle' : 'crack'); E.sndT = rnd(.22, .55); }
     else { SFX.monster(E.pos, r < .45 ? 'click' : r < .75 ? 'crack' : 'crackle'); E.sndT = rnd(.9, 2.3); }
   }
 
   // screams / groans while it hunts you
   if (E.mode === 'hunt' && !E.wasHunt && S.t - E.lastScream > 8) {      // it just locked onto you
-    if (spd) SFX.screech(E.pos, 'shriek'); else SFX.groan(E.pos, 'scream');
+    if (spd) SFX.screech(E.pos, 'shriek'); else if (chn) SFX.sawRev(E.pos); else SFX.groan(E.pos, 'scream');
     E.lastScream = S.t; E.groanT = rnd(2.4, 3.2);
     if (dist < 18) S.flicker = Math.max(S.flicker, .45);
   }
@@ -1299,6 +1447,7 @@ function updateEnemy(dt) {
     E.groanT -= dt;
     if (E.groanT <= 0 && dist < 40) {
       if (spd) { SFX.screech(E.pos, 'hiss'); E.groanT = rnd(2.5, 4.5); }
+      else if (chn) { SFX.sawRev(E.pos); E.groanT = rnd(3, 5); }
       else { SFX.groan(E.pos, Math.random() < .6 ? 'groan' : 'wail'); E.groanT = dist < 10 ? rnd(1.3, 2.2) : rnd(2, 3.4); }
     }
   }
@@ -1370,14 +1519,14 @@ function update(dt) {
     if (levers.length) {
       let near = null;
       for (const lv of levers) if (!lv.pulled && Math.hypot(lv.pos.x - v1.x, lv.pos.z - v1.z) < 1.8) near = lv;
-      if (near !== S.nearLever) { S.nearLever = near; if (near) showMsg('PULL THE LEVER', present ? 'Squeeze the grip' : 'Press E', 2.5); }
+      if (near !== S.nearLever) { S.nearLever = near; if (near) showMsg(LEVEL === 3 ? 'PRESS THE BUTTON' : 'PULL THE LEVER', present ? 'Squeeze the grip' : 'Press E', 2.5); }
       if (near && S.pullReq) {
-        near.pulled = true; near.anim = 0; S.relics++; SFX.lever(near.pos);
+        near.pulled = true; near.anim = 0; if (near.cap) near.cap.position.z = .04; S.relics++; SFX.lever(near.pos);
         near.lamp.material.color.set(0x30ff60); near.glow.material.color.set(0x30ff80); S.flicker = .7;
         if (S.relics >= S.need) {
           exitObj.open = true; exitObj.mat.color.set(0x20d060); exitObj.glow.material.color.set(0x30ff80);
-          showMsg('THE GATE OPENS', 'Reach the green light. RUN.', 6); SFX.sting(); SFX.alarm();
-        } else showMsg(`LEVER ${S.relics} / ${S.need}`, 'It is getting faster.', 3);
+          showMsg(LEVEL === 3 ? 'THE DOORS UNLOCK' : 'THE GATE OPENS', 'Reach the green light. RUN.', 6); SFX.sting(); SFX.alarm();
+        } else showMsg(`${LV.label.slice(0, -1)} ${S.relics} / ${S.need}`, 'It is getting faster.', 3);
       }
     }
     S.pullReq = false;
@@ -1387,7 +1536,7 @@ function update(dt) {
     if (ed < 1.4) {
       if (exitObj.open) {
         S.deadT = 0; SFX.win(); SFX.stalkLevel(0);
-        if (LEVEL === 1) { S.state = 'trans'; fade.material.color.set(0x000000); showMsg('YOU ESCAPED', 'But the way leads down…', 4); }
+        if (LEVEL < 3) { S.state = 'trans'; fade.material.color.set(0x000000); showMsg('YOU ESCAPED', LEVEL === 1 ? 'But the way leads down…' : 'But something worse is waiting…', 4); }
         else { S.state = 'won'; showMsg('YOU ESCAPED', 'Squeeze the trigger to play again.', 999); }
       }
       else if (S.doorMsgT <= 0) {
@@ -1396,7 +1545,7 @@ function update(dt) {
       }
     }
     // ambient scares
-    S.ambT -= dt; if (S.ambT <= 0) { SFX.ambient(v1); S.ambT = LEVEL === 2 ? rnd(5, 12) : rnd(10, 26); }
+    S.ambT -= dt; if (S.ambT <= 0) { SFX.ambient(v1); S.ambT = LEVEL >= 2 ? rnd(5, 12) : rnd(10, 26); }
   }
   if (S.state === 'dead') {
     fade.material.opacity = clamp(S.deadT / 2.2, 0, .96);
@@ -1404,7 +1553,7 @@ function update(dt) {
     poseDead();
     if (S.deadT > 2.4 && msgT <= 0) showMsg('YOU DIED', 'Squeeze the trigger / press R to try again.', 999);
   }
-  if (S.state === 'trans') { fade.material.opacity = clamp(S.deadT / 2.6, 0, 1); if (S.deadT > 3.2) loadLevel(2); }
+  if (S.state === 'trans') { fade.material.opacity = clamp(S.deadT / 2.6, 0, 1); if (S.deadT > 3.2) loadLevel(LEVEL + 1); }
   if (S.state === 'won') fade.material.opacity = lerp(fade.material.opacity, 0, .05);
 
   /* ----- flashlight output ----- */
